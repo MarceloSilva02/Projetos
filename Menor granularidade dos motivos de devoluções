@@ -50,4 +50,3 @@ df_produto_retornado = df1.groupby('mes_de_envio', 'coluna_produto', 'data_repor
 
 df_safrado = df_produto_retornado.join(df_produto_vendido, ['mes_de_envio', 'coluna_produto'], how = 'left')
 df_safrado = df_safrado.withColumn('Safrado_produto', F.col('soma_total_retornado') / F.col('soma_total_vendido'))
-
