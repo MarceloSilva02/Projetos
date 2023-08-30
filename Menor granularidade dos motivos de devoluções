@@ -48,5 +48,21 @@ df_produto_vendido = df1.groupby('mes_de_envio', 'coluna_produto').agg(
 df_produto_retornado = df1.groupby('mes_de_envio', 'coluna_produto', 'data_report', 'coluna_ticketID', 'dif_data_mes').agg(
     F.sum('total_retornado').alias('soma_total_retornado'))
 
+## Trazendo o Safrado No nível SKU
+
 df_safrado = df_produto_retornado.join(df_produto_vendido, ['mes_de_envio', 'coluna_produto'], how = 'left')
 df_safrado = df_safrado.withColumn('Safrado_produto', F.col('soma_total_retornado') / F.col('soma_total_vendido'))
+
+## Trazendo o Safrado no Nível de Fornecedores
+
+df_gross_fornecedor = df1.groupby('mes_de_envio','fornecedor').agg(F.sum('total_vendido').alias('total_vendido_fornecedor'))
+
+df_gross_produto = df1.groupby('mes_de_envio', 'coluna_produto', 'coluna_fornecedor').agg(
+    F.sum('total_vendido').alias('total_vendido_produto'))
+
+## Calcular o Share de cada fornecedor
+
+df_share = df_gross_produto.join(df_gross_fornecedor, ['mes_de_envio', 'coluna_fornecedor'])
+df_share = df_share.withColumn('share_produto', F.col('total_vendido_produto') / F.col('total_vendido_fornecedor'))
+df_share = df_share.drop('total_vendido_produto', 'total_vendido_fornecedor')
+
