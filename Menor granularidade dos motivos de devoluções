@@ -66,3 +66,22 @@ df_share = df_gross_produto.join(df_gross_fornecedor, ['mes_de_envio', 'coluna_f
 df_share = df_share.withColumn('share_produto', F.col('total_vendido_produto') / F.col('total_vendido_fornecedor'))
 df_share = df_share.drop('total_vendido_produto', 'total_vendido_fornecedor')
 
+## Trazendo o Share para cata categoria de produtos
+
+df_gross_categoria = df1.groupby('mes_de_envio','coluna_categoria').agg(F.sum('total_vendido').alias('Total_vendido_categoria'))
+df_gross_produto_categoria = df1.groupby('mes_de_envio', 'coluna_produto', 'coluna_categoria').agg(
+    F.sum('total_vendido').alias('total_vendido_produto_categoria'))
+
+df_share_categoria = df_gross_sku_categoria.join(df_gross_categoria, ['mes_de_envio', 'categoria'])
+df_share_categoria = df_share_categoria.withColumn('share_produto_categoria', F.col('total_vendido_produto_categoria') / F.col('total_vendido_categoria'))
+df_share_categoria = df_share_categoria.drop('total_vendido_produto_categoria', 'total_vendido_categoria')
+
+df_safrado_final = df1.join(df_safrado, ['year_month_delivered', 'nk_sku_simple', 'date_report_original', 'ticket_id', 'dif_data_mes'], how = 'inner')
+
+df_safrado_final = df_safrado_final.join(df_share, ['year_month_delivered', 'nk_sku_simple', 'supplier_name'], how = 'left')
+df_safrado_final = df_safrado_final.withColumn('Safrado_supplier', F.col('Safrado_sku') * F.col('share_sku'))
+df_safrado_final = df_safrado_final.drop('share_sku')
+
+df_safrado_final = df_safrado_final.join(df_share_anchor, ['year_month_delivered', 'nk_sku_simple', 'anchor_category'], how = 'left')
+df_safrado_final = df_safrado_final.withColumn('safrado_anchor', F.col('Safrado_sku') * F.col('share_sku_anchor'))
+df_safrado_final = df_safrado_final.drop('share_sku_anchor')
