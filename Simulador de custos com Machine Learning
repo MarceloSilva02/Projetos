@@ -12,15 +12,15 @@ private_key = "****"
 
 credentials = {
     "type": "service_account",
-    "project_id": "comercial-empresa",
-    "private_key_id": "****",
-    "private_key": private_key,
-    "client_email": "bi-comercial@comercial-empresa.iam.gserviceaccount.com",
-    "client_id": "***",
+    "project_id": "seu-projeto-id",
+    "private_key_id": "sua-private-key-id",
+    "private_key": "sua-private-key",
+    "client_email": "seu-client-email",
+    "client_id": "seu-client-id",
     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
     "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/bi-comercial%40comercial-empresa.iam.gserviceaccount.com",
+    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/seu-client-email",
     "universe_domain": "googleapis.com"
 }
 
@@ -30,43 +30,43 @@ sh = gc.open_by_key(CODE)
 
 query = '''
 SELECT 
-tabela1.nk_sku_simple as sku,
-tabela1.name as produto,
-'http://static.empresa.com.br/p/1-0001-' || CASE
-    WHEN CHAR_LENGTH(REVERSE(tabela1.nk_catalog_config)) = 2 THEN CONCAT(REVERSE(tabela1.nk_catalog_config), '0')
-    WHEN CHAR_LENGTH(REVERSE(tabela1.nk_catalog_config)) = 1 THEN CONCAT(REVERSE(tabela1.nk_catalog_config), '00')
-    ELSE REVERSE(tabela1.nk_catalog_config)
-  END || '-1-zoom.jpg' AS image_1,
-tabela1.supplier_name as fornecedor,
-tabela1.anchor_category as categoria,
-tabela1.material as material,
-tabela1.product_height as altura_produto,
-tabela1.product_length as comprimento_produto,
-tabela1.product_width as largura_produto,
-tabela1.product_weight as peso_produto,
-CASE
-  WHEN tabela1.inbound_shipment_type = 'Somente Empresa (FOB)' THEN tabela1.fob_cost
-ELSE tabela1.cif_cost
-end custo_regular,
-tabela1.product_cost as custo_produto,
-tabela2.special_price as preco_a_prazo,
-tabela2.special_price - (tabela2.special_price * 0.1) AS preco_pix,
-tabela1.product_department,
-tabela1.category_otb,
-sum(tabela3.net_number_of_item_estimated) as venda_pecas,
-sum(tabela3.pc_05) as margem_PCmeio,
-sum(gross_revenue) as gov
-from tabela1
-left join tabela2 on tabela2.sku = tabela1.nk_sku_simple
-left join tabela3 spd on tabela1.tk_portfolio_static = spd.fk_portfolio_static
-left join tabela3 d on spd.fk_date = d.tk_date
+    coluna1 as coluna_sku,
+    coluna2 as coluna_produto,
+    'http://static.empresa.com.br/p/1-0001-' || CASE
+        WHEN CHAR_LENGTH(REVERSE(coluna3)) = 2 THEN CONCAT(REVERSE(coluna3), '0')
+        WHEN CHAR_LENGTH(REVERSE(coluna3)) = 1 THEN CONCAT(REVERSE(coluna3), '00')
+        ELSE REVERSE(coluna3)
+    END || '-1-zoom.jpg' AS coluna_image,
+    coluna4 as coluna_fornecedor,
+    coluna5 as coluna_categoria,
+    coluna6 as coluna_material,
+    coluna7 as coluna_altura_produto,
+    coluna8 as coluna_comprimento_produto,
+    coluna9 as coluna_largura_produto,
+    coluna10 as coluna_peso_produto,
+    CASE
+        WHEN coluna11 = 'Somente Empresa (FOB)' THEN coluna12
+        ELSE coluna13
+    END as coluna_custo_regular,
+    coluna14 as coluna_custo_produto,
+    coluna15 as coluna_preco_a_prazo,
+    coluna15 - (coluna15 * 0.1) AS coluna_preco_pix,
+    coluna16 as coluna_product_department,
+    coluna17 as coluna_category_otb,
+    SUM(coluna18) as coluna_venda_pecas,
+    SUM(coluna19) as coluna_margem_PCmeio,
+    SUM(coluna20) as coluna_gov
+FROM tabela1
+LEFT JOIN tabela2 ON tabela2.coluna = tabela1.coluna
+LEFT JOIN tabela3 spd ON tabela1.coluna_static = spd.coluna_static
+LEFT JOIN tabela3 d ON spd.coluna = d.coluna
 WHERE 1=1
-and d.date >= DATEADD(MONTH, -6, GETDATE())
-and spd.gross_revenue IS NOT NULL
-and spd.gross_revenue <> 0
-and tabela1.product_weight <> 0
-and tabela1.status_simple <> 'deleted'
-group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16
+AND d.coluna >= DATEADD(MONTH, -6, GETDATE())
+AND spd.coluna IS NOT NULL
+AND spd.coluna <> 0
+AND tabela1.coluna_peso_produto <> 0
+AND tabela1.coluna_status <> 'deleted'
+GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16
 '''
 df1 = spark.sql(query1)
 
@@ -89,40 +89,39 @@ df1 = df1.select(*nova_ordem)
 
 df1_pandas = df1.toPandas()
 categoria_codigo = {
-    'Sofás': 0,
-    'Armários': 1,
-    'Mesas de Escritório': 2,
-    'Camas Box': 3,
-    'Têxteis': 4,
-    'Colchões': 5,
-    'Mesas e Mesas de Computador': 6,
-    'Mesas de Jantar': 7,
-    'Cadeiras de Escritório': 8,
-    'Racks e Painéis para TV': 9,
-    'Bancos de Bar': 10,
-    'Conjuntos de Jantar': 11,
-    'Itens de Jantar': 12,
-    'Prateleiras': 13,
-    'Cadeiras de Jantar': 14,
-    'Armários de Cozinha': 15,
-    'Poltronas': 16,
-    'Sofás-Cama': 17,
-    'Mesas de Café e Mesas Auxiliares': 18,
-    'Armazenamento de Escritório': 19,
-    'Armários': 20,
-    'Cômodas e Criados-Mudos': 21,
-    'Móveis de Jardim': 22,
-    'Itens de Decoração': 23,
-    'Camas e Cabeceiras': 24,
-    'Pufes': 25,
-    'Móveis Infantis': 26,
-    'Iluminação': 27,
-    'Configuração de Casa': 28,
-    'Outros': 29,
-    'Tapetes e Carpetes': 30,
-    'Cortinas': 31,
-    'Cozinha UD': 32,
-    'Melhorias para Casa': 33
+    'Categoria 1': 0,
+    'Categoria 2': 1,
+    'Categoria 3': 2,
+    'Categoria 4': 3,
+    'Categoria 5': 4,
+    'Categoria 6': 5,
+    'Categoria 7': 6,
+    'Categoria 8': 7,
+    'Categoria 9': 8,
+    'Categoria 10': 9,
+    'Categoria 11': 10,
+    'Categoria 12': 11,
+    'Categoria 13': 12,
+    'Categoria 14': 13,
+    'Categoria 15': 14,
+    'Categoria 16': 15,
+    'Categoria 17': 16,
+    'Categoria 18': 17,
+    'Categoria 19': 18,
+    'Categoria 20': 19,
+    'Categoria 21': 20,
+    'Categoria 22': 21,
+    'Categoria 23': 22,
+    'Categoria 24': 23,
+    'Categoria 25': 24,
+    'Categoria 26': 25,
+    'Categoria 27': 26,
+    'Categoria 28': 27,
+    'Categoria 29': 28,
+    'Categoria 30': 29,
+    'Categoria 31': 30,
+    'Categoria 32': 31,
+    'Categoria 33': 32
 }
 
 df1_pandas['codigo_categoria'] = df1_pandas['categoria'].map(categoria_codigo)
