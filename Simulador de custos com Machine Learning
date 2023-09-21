@@ -1,0 +1,292 @@
+## QUERY, TRANSFORMAÇÕES DATAFRAME, ANÁLISE ESTATÍSTICAS DOS DADOS E PREPARAÇÃO DOS DADOS
+
+import bender
+import pandas as pd
+import gspread
+from  pyspark.sql import functions as F
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+
+private_key = "****"
+
+credentials = {
+    "type": "service_account",
+    "project_id": "comercial-empresa",
+    "private_key_id": "****",
+    "private_key": private_key,
+    "client_email": "bi-comercial@comercial-empresa.iam.gserviceaccount.com",
+    "client_id": "***",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/bi-comercial%40comercial-empresa.iam.gserviceaccount.com",
+    "universe_domain": "googleapis.com"
+}
+
+CODE = '****'
+gc = gspread.service_account_from_dict(credentials)
+sh = gc.open_by_key(CODE)
+
+query = '''
+SELECT 
+tabela1.nk_sku_simple as sku,
+tabela1.name as produto,
+'http://static.empresa.com.br/p/1-0001-' || CASE
+    WHEN CHAR_LENGTH(REVERSE(tabela1.nk_catalog_config)) = 2 THEN CONCAT(REVERSE(tabela1.nk_catalog_config), '0')
+    WHEN CHAR_LENGTH(REVERSE(tabela1.nk_catalog_config)) = 1 THEN CONCAT(REVERSE(tabela1.nk_catalog_config), '00')
+    ELSE REVERSE(tabela1.nk_catalog_config)
+  END || '-1-zoom.jpg' AS image_1,
+tabela1.supplier_name as fornecedor,
+tabela1.anchor_category as categoria,
+tabela1.material as material,
+tabela1.product_height as altura_produto,
+tabela1.product_length as comprimento_produto,
+tabela1.product_width as largura_produto,
+tabela1.product_weight as peso_produto,
+CASE
+  WHEN tabela1.inbound_shipment_type = 'Somente Empresa (FOB)' THEN tabela1.fob_cost
+ELSE tabela1.cif_cost
+end custo_regular,
+tabela1.product_cost as custo_produto,
+tabela2.special_price as preco_a_prazo,
+tabela2.special_price - (tabela2.special_price * 0.1) AS preco_pix,
+tabela1.product_department,
+tabela1.category_otb,
+sum(tabela3.net_number_of_item_estimated) as venda_pecas,
+sum(tabela3.pc_05) as margem_PCmeio,
+sum(gross_revenue) as gov
+from tabela1
+left join tabela2 on tabela2.sku = tabela1.nk_sku_simple
+left join tabela3 spd on tabela1.tk_portfolio_static = spd.fk_portfolio_static
+left join tabela3 d on spd.fk_date = d.tk_date
+WHERE 1=1
+and d.date >= DATEADD(MONTH, -6, GETDATE())
+and spd.gross_revenue IS NOT NULL
+and spd.gross_revenue <> 0
+and tabela1.product_weight <> 0
+and tabela1.status_simple <> 'deleted'
+group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16
+'''
+df1 = spark.sql(query1)
+
+## Transformações no books
+
+df_gross_otb = df1.groupby('category_otb').agg(F.sum('gov').alias('total_gov_otb'))
+df_gross_sku_otb = df1.groupby('sku', 'category_otb').agg(F.sum('gov').alias('total_sku_otb'))
+df_share = df_gross_sku_otb.join(df_gross_otb, ['category_otb'], how = 'left')
+df_share = df_share.withColumn('share_sku_categoria', F.col('total_sku_otb') / F.col('total_gov_otb'))
+df_share = df_share.drop('total_sku_otb', 'total_gov_otb')
+
+df1 = df1.join(df_share, ['sku', 'category_otb'], how = 'left')
+df1 = df1.withColumn("venda_pecas", F.round(F.col("venda_pecas"), 0))
+df1 = df1.withColumn("image_1", F.concat(F.lit("=IMAGE(\""), df1["image_1"], F.lit("\";2)")))
+
+nova_ordem = ['image_1', 'sku', 'produto','fornecedor','categoria', 'category_otb', 'product_department', 'material', 'peso_produto', 'altura_produto', \
+  'comprimento_produto', 'largura_produto', 'venda_pecas', 'custo_produto','custo_regular', 'preco_a_prazo', 'preco_pix', 'margem_PCmeio', 'gov', 'share_sku_categoria']
+
+df1 = df1.select(*nova_ordem)
+
+df1_pandas = df1.toPandas()
+categoria_codigo = {
+    'Sofás': 0,
+    'Armários': 1,
+    'Mesas de Escritório': 2,
+    'Camas Box': 3,
+    'Têxteis': 4,
+    'Colchões': 5,
+    'Mesas e Mesas de Computador': 6,
+    'Mesas de Jantar': 7,
+    'Cadeiras de Escritório': 8,
+    'Racks e Painéis para TV': 9,
+    'Bancos de Bar': 10,
+    'Conjuntos de Jantar': 11,
+    'Itens de Jantar': 12,
+    'Prateleiras': 13,
+    'Cadeiras de Jantar': 14,
+    'Armários de Cozinha': 15,
+    'Poltronas': 16,
+    'Sofás-Cama': 17,
+    'Mesas de Café e Mesas Auxiliares': 18,
+    'Armazenamento de Escritório': 19,
+    'Armários': 20,
+    'Cômodas e Criados-Mudos': 21,
+    'Móveis de Jardim': 22,
+    'Itens de Decoração': 23,
+    'Camas e Cabeceiras': 24,
+    'Pufes': 25,
+    'Móveis Infantis': 26,
+    'Iluminação': 27,
+    'Configuração de Casa': 28,
+    'Outros': 29,
+    'Tapetes e Carpetes': 30,
+    'Cortinas': 31,
+    'Cozinha UD': 32,
+    'Melhorias para Casa': 33
+}
+
+df1_pandas['codigo_categoria'] = df1_pandas['categoria'].map(categoria_codigo)
+df1_pandas = df1_pandas.fillna(value=0)
+df1_pandas['medianaCatOTB'] = df1_pandas.groupby('categoria_otb')['custo_produto'].transform('median')
+df1_pandas = df1_pandas[df1_pandas['gov'] != 0]
+df1_pandas = df1_pandas.sort_values(by=['gov'], ascending=False)
+
+df1_pandas['custo_ponderado'] = df1_pandas['custo_produto'] * df1_pandas['gov']
+soma_custo_ponderado = df1_pandas.groupby('category_otb')['custo_ponderado'].sum()
+soma_venda_total = df1_pandas.groupby('category_otb')['gov'].sum()
+media_ponderada_categoria = soma_custo_ponderado / soma_venda_total 
+
+df1_pandas = df1_pandas.merge(media_ponderada_categoria.reset_index(name='media_ponderada'), on='category_otb')
+df1_pandas = df1_pandas.drop(columns='custo_ponderado')
+
+unique_catOTB = df1_pandas['category_otb'].unique()
+quartis_por_categoria = {}
+
+for categoria in unique_catOTB:
+    peso_categoria = df1_pandas[df1_pandas['category_otb'] == categoria]['peso_produto']
+    quartis = np.percentile(peso_categoria, [25, 50, 75])
+    quartis_por_categoria[categoria] = quartis
+
+quartis_df = pd.DataFrame(quartis_por_categoria).T
+quartis_df.columns = ['Q1', 'Q2', 'Q3']
+
+df1_pandas = df1_pandas.merge(quartis_df, left_on='category_otb', right_index=True)
+
+def determinar_quartil(row):
+    if row['peso_produto'] < row['Q1']:
+        return 'Q1'
+    elif row['peso_produto'] < row['Q2']:
+        return 'Q2'
+    elif row['peso_produto'] < row['Q3']:
+        return 'Q3'
+    else:
+        return 'Q4'
+      
+df1_pandas['quartil'] = df1_pandas.apply(determinar_quartil, axis=1)
+
+df_ml = df1_pandas.copy()
+df_ml = df_ml.dropna()
+df_ml = df_ml[df_ml['custo_produto'] != 0]
+df_ml = df_ml.loc[:, ['custo_produto', 'peso_produto', 'altura_produto', 'comprimento_produto', 'largura_produto', 'media_ponderada', 'codigo_categoria']]
+
+correlacao = df_ml.corr()
+correlacao
+
+fig, ax = plt.subplots(figsize=(13, 8))
+ax.hist(df_ml['custo_produto'], bins=100, edgecolor='w')
+ax.set_xticks(np.arange(min(df_ml['custo_produto']), max(df_ml['custo_produto']) + 500, 500))
+ax.set_yticks(np.arange(min(df_ml['custo_produto']), max(df_ml['custo_produto']) + 500, 500))
+ax.set_xlim(min(df_ml['custo_produto']), 3500)
+ax.set_ylim(min(df_ml['custo_produto']), 3000)
+ax.set_xlabel('Custo do Produto')
+ax.set_ylabel('Contagem')
+ax.set_title('Histograma do Custo do Produto')
+plt.show()
+
+from sklearn.preprocessing import FunctionTransformer
+
+colunas_para_transformar = ['custo_produto', 'peso_produto', 'altura_produto', 'comprimento_produto', 'largura_produto', 'media_ponderada']
+
+transformer = FunctionTransformer(np.log1p, validate=True)
+dados_transformados = df_ml.copy()
+dados_transformados[colunas_para_transformar] = transformer.transform(dados_transformados[colunas_para_transformar])
+
+coluna_dados_transformados = df_ml.columns
+df_ml_transformado = pd.DataFrame(dados_transformados, columns=coluna_dados_transformados)
+
+df_ml_transformado.corr()
+
+fig, ax = plt.subplots(figsize=(13, 8))
+ax.hist(df_ml_transformado['custo_produto'], bins=50, edgecolor='w')
+ax.set_xlabel('Custo do Produto')
+ax.set_ylabel('Contagem')
+ax.set_title('Histograma do Custo do Produto normalizado pelo logaritmo')
+plt.show()
+
+df1_pandas_input = df1_pandas.values.tolist()
+nomes_colunas = df1_pandas.columns.tolist()
+df1_pandas_input.insert(0, nomes_colunas)
+
+ws = sh.get_worksheet(1)
+ws.update('A1', df1_pandas_input, value_input_option = 'USER_ENTERED')
+
+## TREINANDO O SIMULADOR
+
+y = df_ml_transformado['custo_produto']
+X = df_ml_transformado[['peso_produto', 'altura_produto', 'comprimento_produto', 'largura_produto', 'codigo_categoria', 'media_ponderada']]
+
+X_train, X_test, y_train, y_test = train_test_split(X , y, test_size=0.3, random_state=22)
+
+from sklearn.linear_model import LinearRegression
+from sklearn import metrics
+
+modelo = LinearRegression()
+modelo.fit(X_train, y_train)
+
+print('Qualidade do modelo em treino - R² = {}'.format(modelo.score(X_train, y_train).round(2)))
+y_previsto = modelo.predict(X_test)
+
+print('Qualidade do modelo em previsão R² = {}'.format(metrics.r2_score(y_test, y_previsto).round(2)))
+
+## SIMULADOR, AUTOMATIZAÇÃO DO SHEETS E FUNÇÕES
+
+ws = sh.get_worksheet(0)
+ws.update('I4', 'Inicializando...')
+
+ws = sh.get_worksheet(0)
+ws.update('I4', 'Calculando...')
+
+def collect_category():
+    ws = sh.get_worksheet(0)
+    categoriaOTB = ws.acell('H4').value
+    
+    
+    categoria_filtrada = df1_pandas[df1_pandas['category_otb'] == categoriaOTB]
+    
+    top_items_por_quartil = pd.DataFrame()
+    
+    for quartil in categoria_filtrada['quartil'].unique():
+        
+        quartil_filtrado = categoria_filtrada[categoria_filtrada['quartil'] == quartil]
+        
+        item_mais_representativo = quartil_filtrado.sort_values(by='gov', ascending=False).head(2)
+
+        top_items_por_quartil = top_items_por_quartil.append(item_mais_representativo)
+        top_items_por_quartil = top_items_por_quartil.drop(columns=['codigo_categoria', 'medianaCatOTB','Q1','Q2', 'Q3'])
+    
+    return top_items_por_quartil  
+
+def collect_data():
+  ws = sh.get_worksheet(0)
+  peso = float(ws.acell('D4').value)
+  altura = float(ws.acell('E4').value)
+  comprimento = float(ws.acell('F4').value)
+  largura = float(ws.acell('G4').value)
+  categoriaOTB = ws.acell('H4').value
+
+  categoria_filtrada = df1_pandas[df1_pandas['category_otb'] == categoriaOTB].iloc[0]
+  codigo_categoria = categoria_filtrada['codigo_categoria']
+  mediaCatOTB = categoria_filtrada['media_ponderada']
+
+  entrada_array1 = [peso, altura, comprimento, largura, codigo_categoria, mediaCatOTB]
+  entrada_array1 = np.array([entrada_array1])  
+  return entrada_array1
+
+def input_simulador():
+  entrada_array1 = collect_data()
+
+  entrada_transformada = np.log1p(entrada_array1)
+  previsao_transformada = modelo.predict(entrada_transformada.reshape(1, -1))[0]
+  previsao_original = np.expm1(previsao_transformada).round(2)
+
+  return previsao_original
+
+previsao_original = input_simulador()
+ws = sh.get_worksheet(0)
+ws.update('I4', previsao_original)
+
+produto = collect_category()
+produto = [produto.columns.tolist()] + produto.values.tolist()
+
+ws = sh.get_worksheet(0)
+ws.update('A10', produto, value_input_option = 'USER_ENTERED')
