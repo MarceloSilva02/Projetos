@@ -1,0 +1,140 @@
+SELECT
+  loja as loja_nome,
+  sku as sku_codigo,
+  produto as produto_nome,
+  fornecedor as fornecedor_nome,
+  categoria as categoria_nome,
+  categoria_otb as categoria_otb_nome,
+  dia_mes as data_dia_mes,
+  dia_semana as data_dia_semana,
+  ano_mes as data_ano_mes,
+  quantidade_vendida as total_vendido  
+FROM base_de_vendas_v2
+WHERE 1=1
+AND data_dia_mes >= '2023-01-01'
+AND loja_tipo in ('megastore','outlet','zip','zip - shopping')
+GROUP BY 1,2,3,4,5,6,7,8,9;
+df_vendas2 = spark.sql(query_vendas2)
+df_vendas2.createOrReplaceTempView('base_vendas2')
+
+
+SELECT
+  loja as loja_nome,
+  sku as sku_codigo,
+  produto as produto_nome,
+  fornecedor as fornecedor_nome,
+  anchor_category as categoria_principal,
+  category_otb as categoria_otb_nome,
+  custo_unitario as custo_unitario_produto,
+  cluster as cluster_nome,
+  dia as data_dia,
+  weekday as data_dia_semana,
+  year_month as data_ano_mes,
+  quantidade_vendida as quantidade_vendida,
+  quantidade_estoque as quantidade_em_estoque,
+  custo_estoque as custo_do_estoque
+FROM base_de_estoque
+WHERE 1=1
+AND data_dia >= '2023-01-01'
+AND is_consigned = 1
+GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14;
+
+df_teste = spark.sql(query_stock2)
+
+df_teste = df_teste.fillna('Fora de cluster', subset=["cluster"])
+df_teste = df_teste.withColumn('flag_cluster', F.when((F.col('cluster') != 'Fora de cluster'), 'In_cluster').otherwise('Not_in_cluster'))
+df_teste = df_teste.withColumn('In_Stock', F.when(F.col('quantidade_estoque') > 0, 'In_stock').otherwise('out_of_stock'))
+
+df_window = df_teste.alias('df_window')
+
+window_spec_4w = Window.partitionBy('sku').orderBy('dia').rowsBetween(-27,0)
+window_spec_60 = Window.partitionBy('sku').orderBy('dia').rowsBetween(-59, 0)
+window_spec_30 = Window.partitionBy('sku').orderBy('dia').rowsBetween(-29, 0)
+window_spec_7 = Window.partitionBy('sku').orderBy('dia').rowsBetween(-6, 0)
+
+df_window = df_window.withColumn('media_vendas_7d', F.avg('quantidade_vendida').over(window_spec_7))
+df_window = df_window.withColumn('media_vendas_4w', F.avg('quantidade_vendida').over(window_spec_4w))
+df_window = df_window.withColumn('media_vendas_30d', F.avg('quantidade_vendida').over(window_spec_30))
+df_window = df_window.withColumn('media_vendas_60d', F.avg('quantidade_vendida').over(window_spec_60))
+
+df_window = df_window.withColumn('Cobertura B', F.col('quantidade_estoque') / F.col('media_vendas_4w'))
+df_window = df_window.fillna(999, subset=['Cobertura B'])
+df_window = df_window.fillna(0)
+
+df_window = df_window.withColumn('Tipo', F.when(F.col('Cobertura B') <= 60, 'BEST-SELLERS') \
+                                   .otherwise(F.when((F.col('Cobertura B') > 60) & (F.col('Cobertura B') <= 90), 'OK') \
+                                   .otherwise(F.when((F.col('Cobertura B') > 90) & (F.col('Cobertura B') <= 120), 'LENTOS') \
+                                   .otherwise(F.when(F.col('Cobertura B') > 120, 'SLOW-MOVERS')))))
+
+df_window = df_window.withColumn('CoberturaA_7d', F.col('quantidade_estoque') / F.col('media_vendas_7d'))
+df_window = df_window.withColumn('CoberturaA_30d', F.col('quantidade_estoque') / F.col('media_vendas_30d'))
+df_window = df_window.withColumn('CoberturaA_60d', F.col('quantidade_estoque') / F.col('media_vendas_60d'))
+
+display(df_window)
+
+df_window2 = df_window.alias('df_window2')
+
+window_spec_60 = Window.partitionBy('sku').orderBy('dia').rowsBetween(-59, 0)
+window_spec_30 = Window.partitionBy('sku').orderBy('dia').rowsBetween(-29, 0)
+window_spec_7 = Window.partitionBy('sku').orderBy('dia').rowsBetween(-6, 0)
+
+df_window2 = df_window2.withColumn('cobertura_media_7d', F.avg('CoberturaA_7d').over(window_spec_7))
+df_window2 = df_window2.withColumn('cobertura_media_30d', F.avg('CoberturaA_30d').over(window_spec_30))
+df_window2 = df_window2.withColumn('cobertura_media_60d', F.avg('CoberturaA_60d').over(window_spec_60))
+
+df_window2 = df_window2.withColumn('tendencia_percentual_30/7', F.col('cobertura_media_7d') - F.col('cobertura_media_30d'))
+df_window2 = df_window2.withColumn('tendencia_percentual_60/30', F.col('cobertura_media_30d') - F.col('cobertura_media_60d'))
+
+df_window2 = df_window2.withColumn(
+    'flag_tendencia',
+    F.when(
+        (F.col('tendencia_percentual_60/30') > 0) & (F.col('tendencia_percentual_30/7') > 0),
+        'Tendencia positiva'
+    )
+    .otherwise(
+        F.when(
+            (F.col('tendencia_percentual_60/30') < 0) & (F.col('tendencia_percentual_30/7') < 0),
+            'Tendencia negativa'
+        )
+        .otherwise('Sem tendencia')
+    )
+)
+
+df_window2 = df_window2.withColumn(
+    'CoberturaA',
+    F.when(
+        F.col('flag_tendencia') == 'Sem tendencia',
+        (F.col('cobertura_media_7d') + F.col('cobertura_media_30d') + F.col('cobertura_media_60d')) / 3
+    )
+    .otherwise(
+        F.when(
+            F.col('flag_tendencia') == 'Tendencia positiva',
+            ((F.col('cobertura_media_7d') + F.col('cobertura_media_30d')) / 2) * 1.25
+        )
+        .otherwise(
+            F.when(
+                F.col('flag_tendencia') == 'Tendencia negativa',
+                ((F.col('cobertura_media_7d') + F.col('cobertura_media_30d')) / 2) * 0.75 
+            )
+        )
+    )
+)
+
+df_window2 = df_window2.fillna(999, subset=['CoberturaA'])
+df_window2 = df_window2.withColumn('TipoA', F.when(F.col('CoberturaA') <= 60, 'BEST-SELLERS') \
+                                   .otherwise(F.when((F.col('CoberturaA') > 60) & (F.col('CoberturaA') <= 90), 'OK') \
+                                   .otherwise(F.when((F.col('CoberturaA') > 90) & (F.col('CoberturaA') <= 120), 'LENTOS') \
+                                   .otherwise(F.when(F.col('CoberturaA') > 120, 'SLOW-MOVERS')))))
+
+df_last_day = df_window2.groupBy(F.col('year_month')).agg(F.max(F.col('dia')).alias('last_day'))
+df_window2 = df_window2.join(df_last_day, ['year_month'], how = 'left')
+df_window2 = df_window2.withColumn('Flag_last_day', F.when(F.col('dia') == F.col('last_day'), 'Is_Last_day').otherwise('Not_last_day'))
+df_window2 = df_window2.drop('cobertura_media_7d','cobertura_media_30d','cobertura_media_60d','tendencia_percentual_60/30','tendencia_percentual_30/7','flag_tendencia','last_day')
+
+df_vendas_mes = df_window2.groupBy('sku','year_month').agg(F.sum('quantidade_vendida').alias('venda_mensal'))
+df_window2 = df_window2.join(df_vendas_mes, ['year_month', 'sku'], how = 'left' )
+
+df_window2 = df_window2.withColumn('venda_last_day', F.when(F.col('Flag_last_day') == 'Is_Last_day', F.col('venda_mensal')).otherwise('0'))
+df_window2 = df_window2.drop('venda_mensal')
+
+df_window2 = df_window2.withColumn('flag_natal', F.when(F.col('sku').isin(natal_list), 'Natal_item').otherwise('Not_natal_item'))
